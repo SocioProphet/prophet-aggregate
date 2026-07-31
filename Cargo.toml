@@ -1,0 +1,22 @@
+[package]
+name = "prophet-aggregate"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Search over the manifest sheaf: enumerates the closed, coherent sections that complete a seed assembly, deduplicated up to isomorphism, deterministically — the SP-3 aggregator atop prophet-sheaf."
+repository = "https://github.com/SocioProphet/prophet-aggregate"
+readme = "README.md"
+keywords = ["sheaf", "search", "composition", "link-grammar", "planning"]
+categories = ["algorithms", "data-structures"]
+
+[dependencies]
+prophet-sheaf = { git = "https://github.com/SocioProphet/prophet-sheaf", rev = "06d7acfcc5f87c5a2e3d9032dabe319633885f1e" }
+smol_str = { version = "0.3", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.clippy]
+all = "warn"
