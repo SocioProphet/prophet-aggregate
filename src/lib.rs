@@ -30,10 +30,12 @@
 
 mod canon;
 mod enumerate;
+pub mod kko;
 mod resolver_index;
 
 pub use canon::{canonical_form, canonical_id};
 pub use enumerate::{Aggregator, AggregateError, Bound, Solution};
+pub use kko::KkoStats;
 pub use resolver_index::{IndexedResolver, ResolverBuilder};
 
 // Re-export the prophet-sheaf surface callers need so they can drive the

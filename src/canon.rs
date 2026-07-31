@@ -43,6 +43,14 @@ pub fn canonical_form(section: &Section) -> Section {
         v.dedup();
     }
 
+    // Fast path: when no two placements share a `(germ, disjunct)` group, no
+    // instances are interchangeable, so there is exactly one relabeling (the
+    // dense one). This is the overwhelmingly common case in a growing search and
+    // skips the permutation machinery entirely.
+    if groups.values().all(|v| v.len() <= 1) {
+        return dense_relabel(section, &groups);
+    }
+
     let total: u128 = groups
         .values()
         .map(|v| factorial(v.len()))

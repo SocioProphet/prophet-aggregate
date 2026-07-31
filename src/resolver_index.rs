@@ -89,6 +89,21 @@ impl ResolverBuilder {
         (self, skipped)
     }
 
+    /// Load a KKO (KBpedia Knowledge Ontology) Turtle/N3 export, adding every
+    /// `rdfs:subClassOf` edge among named classes. The ontology *data* is
+    /// supplied by the caller at runtime (it is CC BY 4.0 and lives in the
+    /// HellGraph layer, not this MIT crate); this only parses it. Returns the
+    /// builder and import statistics.
+    #[must_use]
+    pub fn load_kko(self, turtle: &str) -> (Self, crate::kko::KkoStats) {
+        let (edges, stats) = crate::kko::subclass_edges(turtle);
+        let mut b = self;
+        for (child, parent) in edges {
+            b = b.edge(child.as_str(), parent.as_str());
+        }
+        (b, stats)
+    }
+
     /// Precompute the transitive closure and return the resolver.
     #[must_use]
     pub fn build(self) -> IndexedResolver {
