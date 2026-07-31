@@ -29,11 +29,41 @@ pub fn concept(iri: &str, dir: Direction, arity: Arity) -> Port {
 }
 
 pub fn germ(anchor: &str, ports: Vec<Port>) -> Germ {
+    germ_lvl(anchor, ports, EpistemicLevel::Empirical)
+}
+
+pub fn germ_lvl(anchor: &str, ports: Vec<Port>, level: EpistemicLevel) -> Germ {
     Germ {
         anchor: GermId::from(anchor),
         disjuncts: vec![Disjunct::new(ports)],
-        epistemic: EpistemicLevel::Empirical,
+        epistemic: level,
     }
+}
+
+/// A dataflow manifest where `transform` is only `Speculative` (source and sink
+/// are `Empirical`), so any pipeline using a transform composes down to
+/// `Speculative`.
+pub fn graded_manifest(transform_level: EpistemicLevel) -> Manifest {
+    let mut m = Manifest::new();
+    m.insert(germ_lvl(
+        "source",
+        vec![cap("d", Direction::Out, Arity::Required)],
+        EpistemicLevel::Empirical,
+    ));
+    m.insert(germ_lvl(
+        "sink",
+        vec![cap("d", Direction::In, Arity::Required)],
+        EpistemicLevel::Empirical,
+    ));
+    m.insert(germ_lvl(
+        "transform",
+        vec![
+            cap("d", Direction::Out, Arity::Required),
+            cap("d", Direction::In, Arity::Required),
+        ],
+        transform_level,
+    ));
+    m
 }
 
 /// Capability dataflow vocabulary. Every germ except `hub` has a Required port,

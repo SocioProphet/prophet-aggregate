@@ -100,6 +100,45 @@ fn completes_across_subsumption() {
 }
 
 #[test]
+fn solution_epistemic_is_the_meet_of_its_germs() {
+    use prophet_sheaf::{EpistemicLevel, GermId};
+
+    // transform is only Speculative; source and sink are Empirical.
+    let m = graded_manifest(EpistemicLevel::Speculative);
+    let agg = Aggregator::new(&m, &NoOntology, Policy::default(), Bound::placements(4));
+    let sols = agg.complete(&[place("source", 0)]).unwrap();
+    assert!(!sols.is_empty());
+    for s in &sols {
+        let uses_transform = s
+            .section
+            .placements()
+            .iter()
+            .any(|p| p.germ == GermId::from("transform"));
+        if uses_transform {
+            // Empirical ∧ Speculative ∧ Empirical = Speculative.
+            assert_eq!(s.epistemic, EpistemicLevel::Speculative);
+        } else {
+            // source → sink: Empirical ∧ Empirical = Empirical.
+            assert_eq!(s.epistemic, EpistemicLevel::Empirical);
+        }
+    }
+
+    // A Rejected germ is absorbing: any pipeline through it is Rejected.
+    let m2 = graded_manifest(EpistemicLevel::Rejected);
+    let agg2 = Aggregator::new(&m2, &NoOntology, Policy::default(), Bound::placements(4));
+    for s in agg2.complete(&[place("source", 0)]).unwrap() {
+        let uses_transform = s
+            .section
+            .placements()
+            .iter()
+            .any(|p| p.germ == GermId::from("transform"));
+        if uses_transform {
+            assert_eq!(s.epistemic, EpistemicLevel::Rejected);
+        }
+    }
+}
+
+#[test]
 fn unknown_seed_is_an_error() {
     let m = dataflow_manifest();
     let agg = Aggregator::new(&m, &NoOntology, Policy::default(), Bound::placements(4));

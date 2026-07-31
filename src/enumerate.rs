@@ -21,8 +21,9 @@
 
 use crate::canon::{canonical_form, canonical_id};
 use prophet_sheaf::{
-    can_mate, section_from_parts, Bond, CoherenceError, Direction, DisjunctIdx, GermId, Manifest,
-    MatingRefusal, Placement, Policy, Port, PortRef, ResolverError, Section, SectionId, Subsumption,
+    can_mate, section_from_parts, Bond, CoherenceError, Direction, DisjunctIdx, EpistemicLevel,
+    GermId, Manifest, MatingRefusal, Placement, Policy, Port, PortRef, ResolverError, Section,
+    SectionId, Subsumption,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,6 +51,12 @@ pub struct Solution {
     pub section: Section,
     /// Its content identity.
     pub id: SectionId,
+    /// The assembly's composed epistemic standing: the **meet** of its germs'
+    /// declared levels (from `prophet-truth`, via `prophet-sheaf`). Composition
+    /// degrades — an assembly is no better grounded than its weakest germ — and
+    /// `Rejected` is absorbing, so any assembly resting on a rejected germ is
+    /// itself `Rejected`.
+    pub epistemic: EpistemicLevel,
 }
 
 /// Why a search could not run to completion.
@@ -120,8 +127,28 @@ impl<'a> Aggregator<'a> {
 
         Ok(solutions
             .into_iter()
-            .map(|(id, section)| Solution { section, id })
+            .map(|(id, section)| {
+                let epistemic = self.composed_epistemic(&section);
+                Solution {
+                    section,
+                    id,
+                    epistemic,
+                }
+            })
             .collect())
+    }
+
+    /// The meet of the declared epistemic levels of every germ placed in the
+    /// section — the composition rule from `prophet-truth`: an assembly is no
+    /// more grounded than its weakest part, and inherits `Rejected` absorbingly.
+    fn composed_epistemic(&self, section: &Section) -> EpistemicLevel {
+        let mut level = EpistemicLevel::Proved; // identity for meet (top)
+        for p in section.placements() {
+            if let Some(germ) = self.manifest.get(&p.germ) {
+                level = level.meet(germ.epistemic);
+            }
+        }
+        level
     }
 
     fn expand(
