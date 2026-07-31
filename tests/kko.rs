@@ -47,6 +47,30 @@ fn extracts_named_subclass_edges() {
     assert_eq!(stats.skipped_structural, 1);
 }
 
+const NTRIPLES: &str = "\
+<http://kbpedia.org/kko/rc/Blephariceridae> a owl:Class .
+<http://kbpedia.org/kko/rc/Blephariceridae> rdfs:subClassOf <http://kbpedia.org/kko/rc/Fly-Insect> .
+<http://kbpedia.org/kko/rc/Fly-Insect> rdfs:subClassOf <http://kbpedia.org/kko/rc/Insect> .
+";
+
+#[test]
+fn extracts_ntriples_full_iri_edges() {
+    // KBpedia reference-concept typologies use full-IRI N-Triples, not the KKO
+    // block format.
+    let (edges, stats) = kko::subclass_edges(NTRIPLES);
+    assert_eq!(stats.edges, 2);
+    let (builder, _) = ResolverBuilder::new().load_kko(NTRIPLES);
+    let r = builder.build();
+    assert!(r
+        .subsumes(
+            &Iri::from("http://kbpedia.org/kko/rc/Insect"),
+            &Iri::from("http://kbpedia.org/kko/rc/Blephariceridae"),
+        )
+        .unwrap()
+        .is_some());
+    let _ = edges;
+}
+
 #[test]
 fn imported_hierarchy_answers_transitive_subsumption() {
     let (builder, _) = ResolverBuilder::new().load_kko(SNIPPET);

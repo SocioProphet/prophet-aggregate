@@ -56,11 +56,29 @@ pub fn subclass_edges(turtle: &str) -> (Vec<(ConceptName, ConceptName)>, KkoStat
 
         // subClassOf predicate (may appear on the subject line or an indented one).
         if let Some(pos) = line.find("rdfs:subClassOf") {
+            let before = &line[..pos];
+            let after = &line[pos + "rdfs:subClassOf".len()..];
+
+            // N-Triples / full-IRI style: `<child> rdfs:subClassOf <parent> .`
+            // (KBpedia's reference-concept typologies). The subject is the last
+            // angle-bracket IRI before the predicate; the object is the first
+            // one after it.
+            let before_iris = angle_iris(before);
+            let after_iris = angle_iris(after);
+            if let (Some(child), Some(parent)) = (before_iris.last(), after_iris.first()) {
+                if child != parent {
+                    edges.push((child.clone(), parent.clone()));
+                    subjects_with_edges.insert(child.clone());
+                }
+                continue;
+            }
+
+            // Turtle block / default-namespace style (KKO upper): the subject was
+            // introduced at column 0, the superclass is a `:Name`.
             let Some(subject) = current.clone() else {
                 continue;
             };
-            let rest = &line[pos + "rdfs:subClassOf".len()..];
-            let parents = named_classes(rest);
+            let parents = named_classes(after);
             if parents.is_empty() {
                 // Superclass was a blank node / restriction, not a named class.
                 stats.skipped_structural += 1;
@@ -77,6 +95,25 @@ pub fn subclass_edges(turtle: &str) -> (Vec<(ConceptName, ConceptName)>, KkoStat
     stats.edges = edges.len();
     stats.subjects = subjects_with_edges.len();
     (edges, stats)
+}
+
+/// Extract the contents of every `<...>` angle-bracket IRI in `s`, in order.
+fn angle_iris(s: &str) -> Vec<SmolStr> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            if let Some(rel_end) = s[i + 1..].find('>') {
+                let end = i + 1 + rel_end;
+                out.push(SmolStr::from(&s[i + 1..end]));
+                i = end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 /// If `s` begins with a default-namespace named subject `:Name`, return `Name`.
