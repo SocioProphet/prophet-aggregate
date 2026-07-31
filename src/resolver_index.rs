@@ -203,6 +203,164 @@ impl IndexedResolver {
     }
 }
 
+/// Failure to decode a persisted resolver index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexDecodeError {
+    /// The byte string ended mid-field.
+    Truncated,
+    /// A concept index referenced a node out of range.
+    BadNodeIndex,
+    /// A length-prefixed string was not valid UTF-8.
+    BadUtf8,
+    /// The format magic/version did not match.
+    BadHeader,
+}
+
+impl core::fmt::Display for IndexDecodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            IndexDecodeError::Truncated => "persisted index truncated",
+            IndexDecodeError::BadNodeIndex => "persisted index referenced an out-of-range node",
+            IndexDecodeError::BadUtf8 => "persisted index string was not UTF-8",
+            IndexDecodeError::BadHeader => "persisted index header mismatch",
+        })
+    }
+}
+
+impl std::error::Error for IndexDecodeError {}
+
+const INDEX_MAGIC: &[u8; 4] = b"PSI1"; // prophet-sheaf index, v1
+
+impl IndexedResolver {
+    /// Serialize the **precomputed** index (nodes, parent edges, and the full
+    /// ancestor closure) to a compact, deterministic byte string. Concepts are
+    /// interned to indices, so the encoding is small and stable.
+    ///
+    /// This is the "persisted transitive-closure index": build the resolver once
+    /// over a large ontology, persist it (e.g. in HellGraph), and later
+    /// [`from_index_bytes`](IndexedResolver::from_index_bytes) reloads it with
+    /// **no recomputation** of the closure.
+    #[must_use]
+    pub fn to_index_bytes(&self) -> Vec<u8> {
+        let nodes: Vec<&Iri> = self.nodes.iter().collect();
+        let idx: BTreeMap<&Iri, u32> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (*n, i as u32))
+            .collect();
+
+        let mut out = Vec::new();
+        out.extend_from_slice(INDEX_MAGIC);
+        out.push(self.strict as u8);
+        put_u32(&mut out, nodes.len() as u32);
+        for n in &nodes {
+            put_str(&mut out, n.as_str());
+        }
+        // Parent edges, in node order.
+        for node in &nodes {
+            let ps = self.parents.get(*node);
+            let count = ps.map_or(0, BTreeSet::len);
+            put_u32(&mut out, count as u32);
+            if let Some(ps) = ps {
+                for p in ps {
+                    put_u32(&mut out, idx[p]);
+                }
+            }
+        }
+        // Ancestor closure, in node order.
+        for node in &nodes {
+            let empty = BTreeSet::new();
+            let anc = self.ancestors.get(*node).unwrap_or(&empty);
+            put_u32(&mut out, anc.len() as u32);
+            for a in anc {
+                put_u32(&mut out, idx[a]);
+            }
+        }
+        out
+    }
+
+    /// Reload a resolver from [`to_index_bytes`](IndexedResolver::to_index_bytes)
+    /// with no closure recomputation.
+    pub fn from_index_bytes(bytes: &[u8]) -> Result<Self, IndexDecodeError> {
+        let mut cur = bytes;
+        let header = take_idx(&mut cur, 4)?;
+        if header != INDEX_MAGIC {
+            return Err(IndexDecodeError::BadHeader);
+        }
+        let strict = get_u8_idx(&mut cur)? != 0;
+        let n = get_u32_idx(&mut cur)? as usize;
+        let mut nodes_vec: Vec<Iri> = Vec::with_capacity(n.min(1 << 20));
+        for _ in 0..n {
+            nodes_vec.push(get_str_idx(&mut cur)?);
+        }
+        let node_at = |i: u32| -> Result<Iri, IndexDecodeError> {
+            nodes_vec
+                .get(i as usize)
+                .cloned()
+                .ok_or(IndexDecodeError::BadNodeIndex)
+        };
+
+        let mut parents: BTreeMap<Iri, BTreeSet<Iri>> = BTreeMap::new();
+        for node in &nodes_vec {
+            let count = get_u32_idx(&mut cur)? as usize;
+            let mut set = BTreeSet::new();
+            for _ in 0..count {
+                set.insert(node_at(get_u32_idx(&mut cur)?)?);
+            }
+            if !set.is_empty() {
+                parents.insert(node.clone(), set);
+            }
+        }
+        let mut ancestors: BTreeMap<Iri, BTreeSet<Iri>> = BTreeMap::new();
+        for node in &nodes_vec {
+            let count = get_u32_idx(&mut cur)? as usize;
+            let mut set = BTreeSet::new();
+            for _ in 0..count {
+                set.insert(node_at(get_u32_idx(&mut cur)?)?);
+            }
+            ancestors.insert(node.clone(), set);
+        }
+
+        Ok(IndexedResolver {
+            parents,
+            ancestors,
+            nodes: nodes_vec.into_iter().collect(),
+            strict,
+            witness_cache: RefCell::new(BTreeMap::new()),
+        })
+    }
+}
+
+fn put_u32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_be_bytes());
+}
+fn put_str(out: &mut Vec<u8>, s: &str) {
+    put_u32(out, s.len() as u32);
+    out.extend_from_slice(s.as_bytes());
+}
+fn take_idx<'a>(input: &mut &'a [u8], n: usize) -> Result<&'a [u8], IndexDecodeError> {
+    if input.len() < n {
+        return Err(IndexDecodeError::Truncated);
+    }
+    let (head, tail) = input.split_at(n);
+    *input = tail;
+    Ok(head)
+}
+fn get_u8_idx(input: &mut &[u8]) -> Result<u8, IndexDecodeError> {
+    Ok(take_idx(input, 1)?[0])
+}
+fn get_u32_idx(input: &mut &[u8]) -> Result<u32, IndexDecodeError> {
+    let b = take_idx(input, 4)?;
+    Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+fn get_str_idx(input: &mut &[u8]) -> Result<Iri, IndexDecodeError> {
+    let len = get_u32_idx(input)? as usize;
+    let b = take_idx(input, len)?;
+    core::str::from_utf8(b)
+        .map(Iri::from)
+        .map_err(|_| IndexDecodeError::BadUtf8)
+}
+
 impl Subsumption for IndexedResolver {
     fn subsumes(
         &self,
