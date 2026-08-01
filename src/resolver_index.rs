@@ -16,7 +16,7 @@
 //! ontology, or a test fixture), keeping the MIT surface free of CC-BY content.
 
 use prophet_sheaf::{Iri, ResolverError, Subsumption, SubsumptionWitness};
-use std::cell::RefCell;
+use std::sync::RwLock;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Builder for an [`IndexedResolver`]: accumulate `child ⊑ parent` edges, then
@@ -129,7 +129,7 @@ impl ResolverBuilder {
             ancestors,
             nodes: self.nodes,
             strict: self.strict,
-            witness_cache: RefCell::new(BTreeMap::new()),
+            witness_cache: RwLock::new(BTreeMap::new()),
         }
     }
 }
@@ -141,7 +141,7 @@ pub struct IndexedResolver {
     ancestors: BTreeMap<Iri, BTreeSet<Iri>>,
     nodes: BTreeSet<Iri>,
     strict: bool,
-    witness_cache: RefCell<BTreeMap<(Iri, Iri), SubsumptionWitness>>,
+    witness_cache: RwLock<BTreeMap<(Iri, Iri), SubsumptionWitness>>,
 }
 
 impl IndexedResolver {
@@ -159,7 +159,7 @@ impl IndexedResolver {
     /// sorted order for determinism. Assumes `general` is an ancestor of
     /// `specific` (or equal).
     fn witness_path(&self, general: &Iri, specific: &Iri) -> SubsumptionWitness {
-        if let Some(w) = self.witness_cache.borrow().get(&(general.clone(), specific.clone())) {
+        if let Some(w) = self.witness_cache.read().unwrap().get(&(general.clone(), specific.clone())) {
             return w.clone();
         }
         // BFS from specific to general with predecessor pointers.
@@ -197,7 +197,7 @@ impl IndexedResolver {
         chain.reverse(); // now specific → general
         let witness = SubsumptionWitness { chain };
         self.witness_cache
-            .borrow_mut()
+            .write().unwrap()
             .insert((general.clone(), specific.clone()), witness.clone());
         witness
     }
@@ -326,7 +326,7 @@ impl IndexedResolver {
             ancestors,
             nodes: nodes_vec.into_iter().collect(),
             strict,
-            witness_cache: RefCell::new(BTreeMap::new()),
+            witness_cache: RwLock::new(BTreeMap::new()),
         })
     }
 }

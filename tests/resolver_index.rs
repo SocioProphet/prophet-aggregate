@@ -1,7 +1,7 @@
 //! The indexed subsumption resolver: correctness vs a naive climber, witness
 //! chains, transitivity, strict-mode unknowns, and outage-free operation.
 
-use prophet_aggregate::ResolverBuilder;
+use prophet_aggregate::{IndexedResolver, ResolverBuilder};
 use prophet_sheaf::{Iri, ResolverError, Subsumption};
 
 #[test]
@@ -98,4 +98,41 @@ fn lenient_mode_treats_unknowns_as_isolated_nodes() {
     // Reflexive still holds for an unseen concept; unrelated returns a clean no.
     assert!(r.subsumes(&Iri::from("ex:X"), &Iri::from("ex:X")).unwrap().is_some());
     assert!(r.subsumes(&Iri::from("ex:PII"), &Iri::from("ex:X")).unwrap().is_none());
+}
+
+#[test]
+fn resolver_is_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<IndexedResolver>();
+}
+
+#[test]
+fn concurrent_subsumes_is_consistent() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let r = Arc::new(
+        ResolverBuilder::new()
+            .edge("ex:SSN", "ex:FinancialPII")
+            .edge("ex:FinancialPII", "ex:PII")
+            .build(),
+    );
+    let mut handles = Vec::new();
+    for _ in 0..16 {
+        let r = Arc::clone(&r);
+        handles.push(thread::spawn(move || {
+            for _ in 0..500 {
+                let w = r
+                    .subsumes(&Iri::from("ex:PII"), &Iri::from("ex:SSN"))
+                    .unwrap()
+                    .expect("SSN ⊑ PII");
+                assert_eq!(w.chain.first().unwrap().as_str(), "ex:SSN");
+                assert_eq!(w.chain.last().unwrap().as_str(), "ex:PII");
+                assert!(r.subsumes(&Iri::from("ex:SSN"), &Iri::from("ex:PII")).unwrap().is_none());
+            }
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
 }
